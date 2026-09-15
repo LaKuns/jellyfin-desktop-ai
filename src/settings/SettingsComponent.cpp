@@ -355,10 +355,34 @@ void SettingsComponent::saveStorage()
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 void SettingsComponent::saveSection(SettingsSection* section)
 {
+  // Debounce disk writes: schedule (or reschedule) a single save in 500 ms
+  // instead of writing JSON synchronously every time setValue/setValues is
+  // called. The webclient can call these methods in a tight loop (e.g. while
+  // the user is dragging a slider) and previously each call rewrote the
+  // whole settings file.
+  if (!m_settingsSaveTimer)
+  {
+    m_settingsSaveTimer = new QTimer(this);
+    m_settingsSaveTimer->setSingleShot(true);
+    m_settingsSaveTimer->setInterval(500);
+    connect(m_settingsSaveTimer, &QTimer::timeout, this, [this]() {
+      saveSettings();
+    });
+  }
+  if (!m_storageSaveTimer)
+  {
+    m_storageSaveTimer = new QTimer(this);
+    m_storageSaveTimer->setSingleShot(true);
+    m_storageSaveTimer->setInterval(500);
+    connect(m_storageSaveTimer, &QTimer::timeout, this, [this]() {
+      saveStorage();
+    });
+  }
+
   if (section && section->isStorage())
-    saveStorage();
+    m_storageSaveTimer->start();   // Restart the timer; coalesce bursts
   else
-    saveSettings();
+    m_settingsSaveTimer->start();
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////

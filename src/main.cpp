@@ -98,17 +98,54 @@ static void preinitQt()
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
-char** appendCommandLineArguments(int argc, char **argv, const QStringList& args)
+// Helper class to manage the lifetime of the synthetic argv we build for Qt.
+// Qt never frees the strings or the array, so this RAII guard makes sure we
+// release both when the program exits (matters during long-running sessions
+// and when the main QApplication is destroyed and a temporary QCoreApplication
+// has been created earlier in main()).
+class ScopedArgv
 {
-  size_t newSize = static_cast<size_t>(argc + args.length() + 1) * sizeof(char*);
+public:
+  ScopedArgv(char** argv, QList<QByteArray>&& storage) noexcept
+    : m_argv(argv), m_storage(std::move(storage)) {}
+  ~ScopedArgv()
+  {
+    if (m_argv)
+      free(m_argv);
+    // m_storage's QByteArrays get freed automatically (each owns its data).
+  }
+
+  ScopedArgv(const ScopedArgv&) = delete;
+  ScopedArgv& operator=(const ScopedArgv&) = delete;
+
+  char** get() const { return m_argv; }
+
+private:
+  char** m_argv;
+  QList<QByteArray> m_storage;
+};
+
+/////////////////////////////////////////////////////////////////////////////////////////
+static ScopedArgv appendCommandLineArguments(int argc, char **argv, const QStringList& args)
+{
+  // Keep all the synthetic argument strings alive in a QByteArray list - Qt's
+  // QString::toUtf8().data() pointers are only valid while the QByteArray lives.
+  QList<QByteArray> storage;
+  storage.reserve(args.size());
+
+  int newArgc = argc + static_cast<int>(args.size());
+  size_t newSize = static_cast<size_t>(newArgc + 1) * sizeof(char*);
   char** newArgv = static_cast<char**>(calloc(1, newSize));
   memcpy(newArgv, argv, static_cast<size_t>(argc) * sizeof(char*));
 
   int pos = argc;
-  for(const QString& str : args)
-    newArgv[pos++] = qstrdup(str.toUtf8().data());
+  for (const QString& str : args)
+  {
+    storage.append(str.toUtf8());
+    newArgv[pos++] = storage.last().data();
+  }
 
-  return newArgv;
+  return ScopedArgv(newArgv, std::move(storage));
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -128,6 +165,55 @@ void ShowLicenseInfo()
 QStringList g_qtFlags = {
   "--enable-gpu-rasterization",
   "--disable-features=MediaSessionService"
+};
+
+/////////////////////////////////////////////////////////////////////////////////////////
+// Top-level popup fixer class so it can be stored as a static pointer and only
+// installed once. Prevents memory leak/accumulation if objectCreated is fired
+// multiple times (e.g. QML reload). Defined outside main() / lambdas.
+class PopupFixer : public QObject
+{
+  QQuickWindow* m_mainWindow;
+public:
+  explicit PopupFixer(QQuickWindow* mainWin) : QObject(mainWin), m_mainWindow(mainWin) {}
+  bool eventFilter(QObject* obj, QEvent* event) override {
+    auto* win = qobject_cast<QWindow*>(obj);
+    if (!win || win == m_mainWindow) {
+      return QObject::eventFilter(obj, event);
+    }
+
+    // Fix WebEngineView popup flags to accept focus
+    if (event->type() == QEvent::Show) {
+      Qt::WindowFlags flags = win->flags();
+
+      // Only fix WebEngineView dropdowns (Tool + FramelessWindowHint + WindowStaysOnTopHint)
+      // Don't touch other windows (e.g., MPV-related)
+      bool isWebEnginePopup = (flags & Qt::Tool) &&
+                               (flags & Qt::FramelessWindowHint) &&
+                               (flags & Qt::WindowStaysOnTopHint);
+
+      if (!isWebEnginePopup) {
+        return QObject::eventFilter(obj, event);
+      }
+
+      if (win->transientParent() == nullptr) {
+        win->setTransientParent(m_mainWindow);
+      }
+
+      if (win->modality() != Qt::NonModal) {
+        win->setModality(Qt::NonModal);
+      }
+
+      // WebEngineView creates popups with Qt::Tool | WindowDoesNotAcceptFocus
+      // which prevents interaction. Change to Qt::Popup to accept focus.
+      flags &= ~Qt::Tool;
+      flags |= Qt::Popup;
+      flags &= ~Qt::WindowDoesNotAcceptFocus;
+      win->setFlags(flags);
+    }
+
+    return QObject::eventFilter(obj, event);
+  }
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -195,7 +281,8 @@ int main(int argc, char *argv[])
     parser.addOption(deleteProfileOption);
     parser.addOption(createProfileOption);
 
-    char **newArgv = appendCommandLineArguments(argc, argv, g_qtFlags);
+    ScopedArgv scopedArgv = appendCommandLineArguments(argc, argv, g_qtFlags);
+    char **newArgv = scopedArgv.get();
     int newArgc = argc + static_cast<int>(g_qtFlags.size());
 
     preinitQt();
@@ -505,6 +592,13 @@ int main(int argc, char *argv[])
     // if we get a valid object passed to it. Any error messages will be reported on stderr
     // but since no normal user should ever see this it should be fine
     //
+    // Static guards so the event filters are only installed ONCE, even if
+    // QQmlApplicationEngine::objectCreated is emitted multiple times (e.g.
+    // after a QML reload). Each event filter has a parent (window or app)
+    // so Qt takes ownership and cleans them up on shutdown.
+    static EventFilter* s_eventFilter = nullptr;
+    static PopupFixer* s_popupFixer = nullptr;
+
     QObject::connect(engine, &QQmlApplicationEngine::objectCreated, [&](QObject* object, const QUrl& url)
     {
       Q_UNUSED(url);
@@ -517,54 +611,22 @@ int main(int argc, char *argv[])
       // Set window flags for proper popup handling (e.g., WebEngineView dropdowns)
       window->setFlags(window->flags() | Qt::WindowFullscreenButtonHint);
 
-      // Install event filter for proper event handling
-      window->installEventFilter(new EventFilter(window));
+      // Install event filter ONCE (prevent accumulation on QML reloads)
+      if (!s_eventFilter)
+      {
+        s_eventFilter = new EventFilter(window);
+        window->installEventFilter(s_eventFilter);
+      }
 
-      // Install application event filter to catch popup window creation early
-      class PopupFixer : public QObject {
-        QQuickWindow* m_mainWindow;
-      public:
-        PopupFixer(QQuickWindow* mainWin) : m_mainWindow(mainWin) {}
-        bool eventFilter(QObject* obj, QEvent* event) override {
-          auto* win = qobject_cast<QWindow*>(obj);
-          if (!win || win == m_mainWindow) {
-            return QObject::eventFilter(obj, event);
-          }
-
-          // Fix WebEngineView popup flags to accept focus
-          if (event->type() == QEvent::Show) {
-            Qt::WindowFlags flags = win->flags();
-
-            // Only fix WebEngineView dropdowns (Tool + FramelessWindowHint + WindowStaysOnTopHint)
-            // Don't touch other windows (e.g., MPV-related)
-            bool isWebEnginePopup = (flags & Qt::Tool) &&
-                                     (flags & Qt::FramelessWindowHint) &&
-                                     (flags & Qt::WindowStaysOnTopHint);
-
-            if (!isWebEnginePopup) {
-              return QObject::eventFilter(obj, event);
-            }
-
-            if (win->transientParent() == nullptr) {
-              win->setTransientParent(m_mainWindow);
-            }
-
-            if (win->modality() != Qt::NonModal) {
-              win->setModality(Qt::NonModal);
-            }
-
-            // WebEngineView creates popups with Qt::Tool | WindowDoesNotAcceptFocus
-            // which prevents interaction. Change to Qt::Popup to accept focus.
-            flags &= ~Qt::Tool;
-            flags |= Qt::Popup;
-            flags &= ~Qt::WindowDoesNotAcceptFocus;
-            win->setFlags(flags);
-          }
-
-          return QObject::eventFilter(obj, event);
-        }
-      };
-      app.installEventFilter(new PopupFixer(window));
+      // Install application event filter ONCE to catch popup window creation early
+      if (!s_popupFixer)
+      {
+        s_popupFixer = new PopupFixer(window);
+        // Re-parent to the application so the filter outlives any single
+        // QQuickWindow instance and is cleaned up properly at app shutdown.
+        s_popupFixer->setParent(&app);
+        app.installEventFilter(s_popupFixer);
+      }
 
       QObject* webChannel = qvariant_cast<QObject*>(window->property("webChannel"));
       Q_ASSERT(webChannel);

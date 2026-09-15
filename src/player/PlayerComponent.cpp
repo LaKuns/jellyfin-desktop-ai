@@ -1,6 +1,7 @@
 #include "PlayerComponent.h"
 #include <QString>
 #include <Qt>
+#include <QDateTime>
 #include <QDir>
 #include <QCoreApplication>
 #include <QGuiApplication>
@@ -208,16 +209,16 @@ void PlayerComponent::initializeMpv()
   setOtherConfiguration();
 
   if (auto* s = SettingsComponent::Get().getSection(SETTINGS_SECTION_AUDIO))
-    connect(s, &SettingsSection::valuesUpdated, this, &PlayerComponent::updateAudioConfiguration);
+    connect(s, &SettingsSection::valuesUpdated, this, &PlayerComponent::updateAudioConfiguration, Qt::UniqueConnection);
 
   if (auto* s = SettingsComponent::Get().getSection(SETTINGS_SECTION_VIDEO))
-    connect(s, &SettingsSection::valuesUpdated, this, &PlayerComponent::updateVideoConfiguration);
+    connect(s, &SettingsSection::valuesUpdated, this, &PlayerComponent::updateVideoConfiguration, Qt::UniqueConnection);
 
   if (auto* s = SettingsComponent::Get().getSection(SETTINGS_SECTION_SUBTITLES))
-    connect(s, &SettingsSection::valuesUpdated, this, &PlayerComponent::updateSubtitleConfiguration);
+    connect(s, &SettingsSection::valuesUpdated, this, &PlayerComponent::updateSubtitleConfiguration, Qt::UniqueConnection);
 
   if (auto* s = SettingsComponent::Get().getSection(SETTINGS_SECTION_OTHER))
-    connect(s, &SettingsSection::valuesUpdated, this, &PlayerComponent::updateConfiguration);
+    connect(s, &SettingsSection::valuesUpdated, this, &PlayerComponent::updateConfiguration, Qt::UniqueConnection);
 
   connect(this, &PlayerComponent::onMpvEvents, this, &PlayerComponent::handleMpvEvents, Qt::QueuedConnection);
   emit onMpvEvents();
@@ -1553,12 +1554,24 @@ void PlayerComponent::appendAudioFormat(QTextStream& info, const QString& proper
 /////////////////////////////////////////////////////////////////////////////////////////
 QString PlayerComponent::videoInformation() const
 {
+  // 1-second cache: updateDebugInfo() polls once per second, and each
+  // invocation calls mpv_get_property_osd_string ~20 times. Without the cache
+  // we'd allocate + free hundreds of strings per second while the debug
+  // overlay is enabled.
+  const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+  if (!m_videoInfoCache.isNull() && (nowMs - m_videoInfoCacheStampMs) < 1000)
+    return m_videoInfoCache;
+
   QString infoStr;
   QTextStream info(&infoStr);
 
   // check if video is playing
-  if (m_mpv->getProperty( "idle-active").toBool())
-    return "";
+  if (!m_mpv || m_mpv->getProperty("idle-active").toBool())
+  {
+    m_videoInfoCache = "";
+    m_videoInfoCacheStampMs = nowMs;
+    return m_videoInfoCache;
+  }
 
   info << "File:\n";
   info << "URL: " << MPV_PROPERTY("path") << "\n";
@@ -1628,7 +1641,9 @@ QString PlayerComponent::videoInformation() const
                     << "\n";
 
   info.flush();
-  return infoStr;
+  m_videoInfoCache = infoStr;
+  m_videoInfoCacheStampMs = QDateTime::currentMSecsSinceEpoch();
+  return m_videoInfoCache;
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////

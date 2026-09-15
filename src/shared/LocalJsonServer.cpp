@@ -48,8 +48,16 @@ void LocalJsonServer::serverClientConnected()
   QLocalSocket* socket = m_server->nextPendingConnection();
   if (socket)
   {
+    // Track the socket for the lifetime of its connection so callers using
+    // m_clientSockets can still reach it. We also have to listen for the
+    // disconnected() signal to remove the socket from the list, otherwise
+    // m_clientSockets would grow on every reconnect (and on Windows the
+    // underlying socket handles would accumulate).
     m_clientSockets << socket;
     connect(socket, &QLocalSocket::readyRead, this, &LocalJsonServer::clientReadyRead);
+    connect(socket, &QLocalSocket::disconnected, this, [this, socket]() {
+      m_clientSockets.removeAll(socket);
+    });
     emit clientConnected(socket);
   }
 }

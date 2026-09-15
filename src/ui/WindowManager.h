@@ -116,6 +116,8 @@ private:
   QWindow::Visibility m_previousVisibility;  // State before fullscreen
   QRect m_windowedGeometry;                  // Geometry when in Windowed state
   QTimer* m_geometrySaveTimer;               // Debounced disk sync
+  bool m_sizeSavePending = false;            // Coalesce geometry-save singleShots
+  bool m_positionSavePending = false;        // Coalesce position-save singleShots
 
   // initial size tracking to detect if size changed from default
   QSize m_initialSize;

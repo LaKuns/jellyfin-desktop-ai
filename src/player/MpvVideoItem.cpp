@@ -22,17 +22,25 @@ void MpvVideoItem::setPlayerComponent(PlayerComponent* player)
     qDebug() << "MpvVideoItem::setPlayerComponent called, mpvController():" << mpvController();
     m_player = player;
 
-    // When mpv is ready, give controller to PlayerComponent
-    connect(this, &MpvAbstractItem::ready, this, [this]() {
-        qDebug() << "MpvVideoItem ready() signal fired!";
-        if (m_player && mpvController()) {
-            qDebug() << "Setting mpv controller and initializing";
-            m_player->setMpvController(mpvController());
-            m_player->initializeMpv();
-        } else {
-            qWarning() << "ready() fired but m_player:" << m_player << "mpvController():" << mpvController();
-        }
-    });
+    // Guard against duplicate connect() calls - if the QML scene is reloaded
+    // (e.g. the user reloads the webclient or the WebEngineView recreates
+    // MpvVideoItem), each new instance would otherwise re-connect to its own
+    // ready() signal, causing the lambda to fire N times per signal and
+    // PlayerComponent::initializeMpv() to be called repeatedly.
+    if (!m_readyConnected)
+    {
+        m_readyConnected = true;
+        connect(this, &MpvAbstractItem::ready, this, [this]() {
+            qDebug() << "MpvVideoItem ready() signal fired!";
+            if (m_player && mpvController()) {
+                qDebug() << "Setting mpv controller and initializing";
+                m_player->setMpvController(mpvController());
+                m_player->initializeMpv();
+            } else {
+                qWarning() << "ready() fired but m_player:" << m_player << "mpvController():" << mpvController();
+            }
+        });
+    }
 
     // Check if already ready
     if (mpvController()) {

@@ -11,11 +11,14 @@
 #include <QJsonDocument>
 #include <QNetworkRequest>
 #include <QNetworkAccessManager>
+#include <QNetworkDiskCache>
 #include <QNetworkReply>
 #include <QSslConfiguration>
 #include <QSslSocket>
 #include <QSslCertificate>
 #include <QSslError>
+#include <QStandardPaths>
+#include <QDir>
 #include <QDebug>
 #include <QRegularExpression>
 #include <QPointer>
@@ -69,6 +72,18 @@ SystemComponent::SystemComponent(QObject* parent) : ComponentBase(parent), m_pla
 
   m_networkManager = new QNetworkAccessManager(this);
 
+  // On Windows the QNetworkAccessManager keeps idle connections / sockets
+  // around in its connection pool. Without a cache + transfer timeout, every
+  // checkServerConnectivity() / fetchPageForCSPWorkaround() call builds up
+  // additional socket handles (each holding TLS state). This is one of the
+  // contributors to the long-running leak on Windows + Qt6.
+  m_networkManager->setTransferTimeout(NETWORK_REQUEST_TIMEOUT_MS);
+
+  QNetworkDiskCache* diskCache = new QNetworkDiskCache(m_networkManager);
+  diskCache->setCacheDirectory(ProfileManager::activeProfile().cacheDir("network"));
+  diskCache->setMaximumCacheSize(50 * 1024 * 1024);  // 50 MB
+  m_networkManager->setCache(diskCache);
+
 // define OS Type
 #if defined(Q_OS_MAC)
   m_platformType = platformTypeOsx;
@@ -93,10 +108,10 @@ SystemComponent::SystemComponent(QObject* parent) : ComponentBase(parent), m_pla
 
   if (auto* s = SettingsComponent::Get().getSection(SETTINGS_SECTION_AUDIO))
   {
-    connect(s, &SettingsSection::valuesUpdated, [=]()
+    connect(s, &SettingsSection::valuesUpdated, this, [this]()
     {
       emit capabilitiesChanged(getCapabilitiesString());
-    });
+    }, Qt::UniqueConnection);
   }
 }
 

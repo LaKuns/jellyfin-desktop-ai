@@ -102,23 +102,36 @@ void WindowManager::initializeWindow(QQuickWindow* window)
   connect(m_window, &QQuickWindow::visibilityChanged,
           this, &WindowManager::onVisibilityChanged);
 
-  // Separate handlers for size and position
-  // Use deferred save to ensure windowState is updated before checking
-  // (geometry signals fire before state signals during maximize transition)
+  // Coalesce size/position save requests so a burst of geometry signals only
+  // produces a single save on the next event-loop tick. Each pending singleShot
+  // creates a new heap-allocated timer object that is then deleted - during
+  // window drag/resize storms this was creating thousands of short-lived
+  // QObject instances. The 0-delay is required so that windowState() has been
+  // updated before saveWindowSize() runs (state signals fire after geometry).
   auto scheduleSizeSave = [this]() {
+    if (m_sizeSavePending || !m_window)
+      return;
+    m_sizeSavePending = true;
     QTimer::singleShot(0, this, [this]() {
+      m_sizeSavePending = false;
       if (m_window) {
         saveWindowSize();
-        m_geometrySaveTimer->start();  // Debounced disk sync
+        if (m_geometrySaveTimer)
+          m_geometrySaveTimer->start();  // Debounced disk sync
       }
     });
   };
 
   auto schedulePositionSave = [this]() {
+    if (m_positionSavePending || !m_window)
+      return;
+    m_positionSavePending = true;
     QTimer::singleShot(0, this, [this]() {
+      m_positionSavePending = false;
       if (m_window) {
         saveWindowPosition();
-        m_geometrySaveTimer->start();  // Debounced disk sync
+        if (m_geometrySaveTimer)
+          m_geometrySaveTimer->start();  // Debounced disk sync
       }
     });
   };

@@ -7,6 +7,7 @@
 #include <QNetworkDiskCache>
 #include <QNetworkRequest>
 #include <QNetworkReply>
+#include <QPointer>
 #include <QUrlQuery>
 #include <QMimeDatabase>
 #include <QDebug>
@@ -67,51 +68,6 @@ void AlbumArtProvider::requestArtwork(const QVariantMap& metadata, const QUrl& b
 void AlbumArtProvider::cancelPending()
 {
   cleanup();
-}
-
-void AlbumArtProvider::onArtworkDownloaded()
-{
-  QNetworkReply* reply = qobject_cast<QNetworkReply*>(sender());
-  if (!reply)
-    return;
-
-  if (reply == m_pendingReply)
-    m_pendingReply = nullptr;
-
-  reply->deleteLater();
-
-  bool fromCache = reply->attribute(QNetworkRequest::SourceIsFromCacheAttribute).toBool();
-
-  if (reply->error() != QNetworkReply::NoError)
-  {
-    if (reply->error() != QNetworkReply::OperationCanceledError)
-      qDebug() << "AlbumArtProvider: Download failed:" << reply->errorString();
-    emit artworkUnavailable();
-    return;
-  }
-
-  QByteArray imageData = reply->readAll();
-  if (imageData.isEmpty())
-  {
-    qDebug() << "AlbumArtProvider: Download returned empty data";
-    emit artworkUnavailable();
-    return;
-  }
-
-  static QMimeDatabase mimeDb;
-  QString mimeType = mimeDb.mimeTypeForData(imageData).name();
-  qDebug() << "AlbumArtProvider:" << (fromCache ? "cache hit" : "cache miss")
-           << "-" << reply->url().toString() << "-" << imageData.size() << "bytes";
-
-  if (mimeType.startsWith("image/"))
-  {
-    emit artworkReady(imageData, mimeType);
-  }
-  else
-  {
-    qDebug() << "AlbumArtProvider: Not an image type:" << mimeType;
-    emit artworkUnavailable();
-  }
 }
 
 QString AlbumArtProvider::extractArtworkUrl(const QVariantMap& metadata, const QUrl& baseUrl)
@@ -263,11 +219,63 @@ QString AlbumArtProvider::extractArtworkUrl(const QVariantMap& metadata, const Q
 
 void AlbumArtProvider::cleanup()
 {
-  if (m_pendingReply)
+  // Guard against re-entrancy: when abort() is called on the reply below, the
+  // finished() signal is emitted synchronously which re-enters this method
+  // through onArtworkDownloaded(). Using QPointer ensures the reply pointer
+  // becomes null on destruction, and we only schedule deleteLater on the
+  // *current* reply - any reply already in deleteLater-queue won't be touched.
+  if (QPointer<QNetworkReply> reply = m_pendingReply)
   {
-    m_pendingReply->abort();
-    QMetaObject::invokeMethod(m_pendingReply, "deleteLater", Qt::QueuedConnection);
     m_pendingReply = nullptr;
     m_pendingUrl.clear();
+    reply->abort();
+    reply->deleteLater();
+  }
+}
+
+void AlbumArtProvider::onArtworkDownloaded()
+{
+  // Sender might already have been deleteLater'd if cleanup() ran first; in
+  // that case qobject_cast returns null and we just bail.
+  QPointer<QNetworkReply> reply = qobject_cast<QNetworkReply*>(sender());
+  if (!reply)
+    return;
+
+  if (m_pendingReply == reply)
+    m_pendingReply = nullptr;
+
+  reply->deleteLater();
+
+  bool fromCache = reply->attribute(QNetworkRequest::SourceIsFromCacheAttribute).toBool();
+
+  if (reply->error() != QNetworkReply::NoError)
+  {
+    if (reply->error() != QNetworkReply::OperationCanceledError)
+      qDebug() << "AlbumArtProvider: Download failed:" << reply->errorString();
+    emit artworkUnavailable();
+    return;
+  }
+
+  QByteArray imageData = reply->readAll();
+  if (imageData.isEmpty())
+  {
+    qDebug() << "AlbumArtProvider: Download returned empty data";
+    emit artworkUnavailable();
+    return;
+  }
+
+  static QMimeDatabase mimeDb;
+  QString mimeType = mimeDb.mimeTypeForData(imageData).name();
+  qDebug() << "AlbumArtProvider:" << (fromCache ? "cache hit" : "cache miss")
+           << "-" << reply->url().toString() << "-" << imageData.size() << "bytes";
+
+  if (mimeType.startsWith("image/"))
+  {
+    emit artworkReady(imageData, mimeType);
+  }
+  else
+  {
+    qDebug() << "AlbumArtProvider: Not an image type:" << mimeType;
+    emit artworkUnavailable();
   }
 }

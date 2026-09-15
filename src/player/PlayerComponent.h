@@ -278,6 +278,13 @@ private:
   QVariantList m_queuedItems;
 
   AlbumArtProvider* m_albumArtProvider;
+
+  // Cache for videoInformation(). updateDebugInfo() runs once per second when
+  // the debug overlay is enabled, and each call invokes mpv_get_property_osd_string
+  // ~20 times (each of which allocates + frees a char*). Caching the result
+  // for 1 second collapses the bulk of those calls and reduces GC pressure.
+  mutable QString m_videoInfoCache;
+  mutable qint64 m_videoInfoCacheStampMs = 0;
 };
 
 #endif // PLAYERCOMPONENT_H

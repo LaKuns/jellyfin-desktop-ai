@@ -25,6 +25,12 @@ Window
   property string videoInfo: ""
   property string webUrl: ""
 
+  // Tracks which WebEngineView instances already have the pageContentReady
+  // signal connected, so we don't stack duplicate handlers if the view is
+  // reconstructed (e.g. QML reload). Previously stored on the view itself
+  // via `web._cspFixConnected`, but that tripped Qt 6's QML AOT compiler.
+  property var cspFixMap: ({})
+
   property bool showSystemTrayIcon: webDesktopMode && components.system.isWindows &&
                                     components.settings.windowsTrayIcon
 
@@ -258,15 +264,24 @@ Window
     {
       console.log("WebEngineView size:", width, "x", height, "backgroundColor:", backgroundColor)
       forceActiveFocus()
-      mainWindow.reloadWebClient.connect(reload)
 
-      // Handle CSP workaround from C++
-      components.system.pageContentReady.connect(function(html, finalUrl, hadCSP) {
-        if (hadCSP) {
-          console.log("CSP workaround: navigating to", finalUrl);
-          web.url = finalUrl;
-        }
-      })
+      // Handle CSP workaround from C++ - guard against duplicate handlers if
+      // the view is reconstructed (e.g. QML reload). The original implementation
+      // used `web._cspFixConnected` (an undeclared property on the view), but
+      // Qt 6's QML AOT compiler cannot resolve undeclared properties and
+      // silently dropped the rest of this onCompleted body, breaking the
+      // nativeshell injection that runs after this block. We now store the
+      // marker on the QML Window object via cspFixMap (a QML `var` property),
+      // which the AOT compiler accepts.
+      if (!cspFixMap[web]) {
+        cspFixMap[web] = true
+        components.system.pageContentReady.connect(function(html, finalUrl, hadCSP) {
+          if (hadCSP) {
+            console.log("CSP workaround: navigating to", finalUrl);
+            web.url = finalUrl;
+          }
+        })
+      }
 
       var nativeshell =
       {
@@ -275,7 +290,7 @@ Window
         worldId: WebEngineScript.MainWorld
       }
 
-      web.profile.userScripts.collection = [ nativeshell ];
+      web.profile.userScripts.collection = [ nativeshell ]
     }
 
     onLoadingChanged: function(loadingInfo)
@@ -317,6 +332,14 @@ Window
       console.log("Request fullscreen: " + request.toggleOn)
       mainWindow.setFullScreen(request.toggleOn)
       request.accept()
+    }
+
+    onContextMenuRequested: function(request)
+    {
+      // Suppress the Qt default context menu (Reload / View Source / Inspect, etc.).
+      // Jellyfin Web listens for the JavaScript 'contextmenu' event on its own
+      // and shows its own menu, so accepting here does NOT prevent that.
+      request.accepted = true
     }
 
     onJavaScriptConsoleMessage: function(level, message, lineNumber, sourceID)

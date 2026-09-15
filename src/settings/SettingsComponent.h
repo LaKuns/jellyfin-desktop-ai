@@ -2,6 +2,7 @@
 #define SETTINGSCOMPONENT_H
 
 #include <QObject>
+#include <QTimer>
 #include "utils/Utils.h"
 #include "ComponentManager.h"
 #include "SettingsValue.h"
@@ -117,6 +118,14 @@ private:
   int m_settingsVersion;
   int m_sectionIndex;
   bool m_cliIgnoreSSLErrors = false;
+
+  // Debounced disk-write timer. setValue/setValues are called frequently
+  // from webclient JavaScript (e.g. while the user is dragging a slider).
+  // Writing the entire settings.json on every call generates a lot of disk
+  // I/O and contributes to memory churn on Windows + Qt6. The 500ms debounce
+  // window collapses bursts of changes into a single write.
+  QTimer* m_settingsSaveTimer = nullptr;
+  QTimer* m_storageSaveTimer = nullptr;
 
   void loadConf(const QString& path, bool storage);
 };
