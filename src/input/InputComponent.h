@@ -95,6 +95,7 @@ public:
   const char* componentName() override { return "input"; }
   bool componentExport() override { return true; }
   bool componentInitialize() override;
+  ~InputComponent() override;
 
   void registerHostCommand(const QString& command, QObject* receiver, const char* slot);
   void registerHostCommand(const QString& command, std::function<void(void)> function);

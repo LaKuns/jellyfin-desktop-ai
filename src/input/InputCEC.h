@@ -2,6 +2,7 @@
 #define INPUTCEC_H
 
 #include <QMutex>
+#include <QPointer>
 #include <QTimer>
 #include "input/InputComponent.h"
 #include <libcec/cec.h>
@@ -63,7 +64,7 @@ private:
   ICECCallbacks m_callbacks;
   ICECAdapter* m_adapter;
   QString m_adapterPort;
-  QTimer* m_timer;
+  QPointer<QTimer> m_timer;
   bool m_verboseLogging;
 };
 

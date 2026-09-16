@@ -127,7 +127,7 @@ bool InputCECWorker::init()
 //////////////////////////////////////////////////////////////////////////////////////////////////
 void InputCECWorker::closeCec()
 {
-  if (m_timer->isActive())
+  if (m_timer && m_timer->isActive())
   {
     m_timer->stop();
     delete m_timer;

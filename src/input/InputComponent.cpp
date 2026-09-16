@@ -41,6 +41,14 @@ InputComponent::InputComponent(QObject* parent) : ComponentBase(parent)
   m_mappings = new InputMapping(this);
 }
 
+InputComponent::~InputComponent()
+{
+  // m_hostCommands values are ReceiverSlot* with no QObject parent, so we
+  // have to delete them explicitly to avoid leaking ~10 instances per app run.
+  qDeleteAll(m_hostCommands);
+  m_hostCommands.clear();
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 bool InputComponent::addInput(InputBase* base)
 {
@@ -58,19 +66,22 @@ bool InputComponent::addInput(InputBase* base)
   //
   connect(base, &InputBase::receivedInput, this, &InputComponent::remapInput);
 
-  // for auto-repeating inputs
+  // for auto-repeating inputs (lazy-create once, not per-input)
   //
-  m_autoRepeatTimer = new QTimer(this);
-  connect(m_autoRepeatTimer, &QTimer::timeout, [=]()
+  if (!m_autoRepeatTimer)
   {
-    if (!m_autoRepeatActions.isEmpty())
+    m_autoRepeatTimer = new QTimer(this);
+    connect(m_autoRepeatTimer, &QTimer::timeout, [=]()
     {
-      qDebug() << "Emit input action (autorepeat):" << m_autoRepeatActions;
-      emit hostInput(m_autoRepeatActions);
-    }
+      if (!m_autoRepeatActions.isEmpty())
+      {
+        qDebug() << "Emit input action (autorepeat):" << m_autoRepeatActions;
+        emit hostInput(m_autoRepeatActions);
+      }
 
-    m_autoRepeatTimer->setInterval(AUTOREPEAT_MSEC);
-  });
+      m_autoRepeatTimer->setInterval(AUTOREPEAT_MSEC);
+    });
+  }
 
   return true;
 }

@@ -699,7 +699,11 @@ void SystemComponent::checkForUpdates()
     QNetworkRequest req(qCheckUrl);
     req.setHeader(QNetworkRequest::UserAgentHeader, getUserAgent());
 
+    // Schedule the manager for deletion once the request finishes, so it gets
+    // cleaned up along with the reply instead of leaking for the rest of the
+    // process lifetime.
     connect(manager, &QNetworkAccessManager::finished, this, &SystemComponent::updateInfoHandler);
+    connect(manager, &QNetworkAccessManager::finished, manager, &QObject::deleteLater);
     manager->get(req);
 #else
     emit updateInfoEmitted("SSL_UNAVAILABLE");

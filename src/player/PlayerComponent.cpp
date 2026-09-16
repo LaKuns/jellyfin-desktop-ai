@@ -75,7 +75,11 @@ void PlayerComponent::componentPostInitialize()
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 PlayerComponent::~PlayerComponent()
 {
-  // m_mpv is owned by MpvVideoItem, don't access it here as it may be destroyed
+  // m_mpv is owned by MpvVideoItem, don't access it here as it may be destroyed.
+  // However, if m_mpv is still alive here, we must clear the wakeup callback
+  // we registered with it, otherwise mpv will keep a dangling pointer to us.
+  if (m_mpv)
+    mpv_set_wakeup_callback(m_mpv->mpv(), nullptr, nullptr);
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////

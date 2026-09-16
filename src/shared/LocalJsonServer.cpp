@@ -50,13 +50,15 @@ void LocalJsonServer::serverClientConnected()
   {
     // Track the socket for the lifetime of its connection so callers using
     // m_clientSockets can still reach it. We also have to listen for the
-    // disconnected() signal to remove the socket from the list, otherwise
-    // m_clientSockets would grow on every reconnect (and on Windows the
-    // underlying socket handles would accumulate).
+    // disconnected() signal to remove the socket from the list and schedule
+    // it for deletion. Otherwise m_clientSockets would grow on every
+    // reconnect (and on Windows the underlying socket handles would
+    // accumulate).
     m_clientSockets << socket;
     connect(socket, &QLocalSocket::readyRead, this, &LocalJsonServer::clientReadyRead);
     connect(socket, &QLocalSocket::disconnected, this, [this, socket]() {
       m_clientSockets.removeAll(socket);
+      socket->deleteLater();
     });
     emit clientConnected(socket);
   }

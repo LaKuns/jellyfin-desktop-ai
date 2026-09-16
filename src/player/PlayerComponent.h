@@ -274,7 +274,6 @@ private:
 
   QVariantList m_webPlaylist;
   QString m_currentWebPlaylistItemId;
-  QTimer* m_playlistTimer;
   QVariantList m_queuedItems;
 
   AlbumArtProvider* m_albumArtProvider;
