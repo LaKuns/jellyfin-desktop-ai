@@ -44,7 +44,11 @@ Window
 
   onClosing: function(close) {
     if (showSystemTrayIcon) {
-      // Minimize to tray on close.
+      // Minimize to tray on close. The user can still exit via the tray
+      // menu's Quit action, the Ctrl+Q shortcut, or the Quit action in the
+      // main window's menu. Refusing the close here hides the window but
+      // keeps the process running so background playback / media keys can
+      // keep working.
       close.accepted = false
       mainWindow.hide()
     }

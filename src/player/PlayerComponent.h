@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <QtCore/qglobal.h>
+#include <QPointer>
 #include <QVariant>
 #include <QSet>
 #include <QQuickWindow>
@@ -259,7 +260,7 @@ private:
   int m_lastBufferingPercentage;
   double m_lastPositionUpdate;
   qint64 m_playbackAudioDelay;
-  QQuickWindow* m_window;
+  QPointer<QQuickWindow> m_window;
   float m_mediaFrameRate;
   QTimer m_restoreDisplayTimer;
   QTimer m_reloadAudioTimer;

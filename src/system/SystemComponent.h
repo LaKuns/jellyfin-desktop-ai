@@ -2,6 +2,7 @@
 #define __SYSTEM_COMPONENT_H__
 
 #include "ComponentManager.h"
+#include <QPointer>
 #include <QTimer>
 #include <QNetworkReply>
 #include <QNetworkAccessManager>
@@ -136,8 +137,8 @@ private:
   QString m_authenticationToken;
   QString m_webClientVersion;
   qreal m_scale;
-  QNetworkReply* m_connectivityCheckReply;
-  QNetworkReply* m_resolveUrlReply;
+  QPointer<QNetworkReply> m_connectivityCheckReply;
+  QPointer<QNetworkReply> m_resolveUrlReply;
   QTimer* m_connectivityRetryTimer;
   QString m_pendingConnectivityUrl;
 

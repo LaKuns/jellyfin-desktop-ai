@@ -2,6 +2,7 @@
 #define WINDOWMANAGER_H
 
 #include <QObject>
+#include <QPointer>
 #include <QQuickItem>
 #include <QQuickWindow>
 #include <QRect>
@@ -105,7 +106,7 @@ private:
   void enforceZoom();
 
   QQuickWindow* m_window;
-  QQuickItem* m_webView;
+  QPointer<QQuickItem> m_webView;
   bool m_enforcingZoom;
   QString m_currentScreenName;
   int m_ignoreFullscreenSettingsChange;

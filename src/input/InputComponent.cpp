@@ -301,6 +301,12 @@ void InputComponent::registerHostCommand(const QString& command, QObject* receiv
   qDebug() << "Adding host command:" << qPrintable(command) << "mapped to"
                << qPrintable(QString(receiver->metaObject()->className()) + "::" + recvSlot->m_slot);
 
+  // If this command was registered before, free the old ReceiverSlot to avoid
+  // a leak. m_hostCommands.values() are bare pointers with no Qt parent.
+  ReceiverSlot* old = m_hostCommands.value(command, nullptr);
+  if (old)
+    delete old;
+
   m_hostCommands.insert(command, recvSlot);
 
   auto slotWithArgs = QString("%1(QString)").arg(QString::fromLatin1(recvSlot->m_slot)).toLatin1();
@@ -327,6 +333,13 @@ void InputComponent::registerHostCommand(const QString& command, std::function<v
   auto recvSlot = new ReceiverSlot;
   recvSlot->m_function = function;
   qDebug() << "Adding host command:" << qPrintable(command) << "mapped to anonymous function";
+
+  // If this command was registered before, free the old ReceiverSlot to avoid
+  // a leak. m_hostCommands.values() are bare pointers with no Qt parent.
+  ReceiverSlot* old = m_hostCommands.value(command, nullptr);
+  if (old)
+    delete old;
+
   m_hostCommands.insert(command, recvSlot);
 }
 
