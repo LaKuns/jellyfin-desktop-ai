@@ -646,7 +646,11 @@ int main(int argc, char *argv[])
     int ret = app.exec();
 
     delete uniqueApp;
+    // Tear down the QML engine (releases the QWebEngineView and its
+    // delegate render process) before destroying the log file, so any
+    // log lines emitted during shutdown still land on disk.
     Globals::EngineDestroy();
+    Log::Cleanup();
 
     return ret;
   }
